@@ -164,8 +164,12 @@ impl Art {
     fn hull(&self, b: &BossShip, color: Color) {
         let (t, r) = match b.kind {
             Hull::Barge => (&self.barge, Rect::new(65., 0., 890., 1536.)),
-            Hull::Destroyer => (&self.rebel, Rect::new(445., 750., 365., 504.)),
-            Hull::Executor => (&self.rebel, Rect::new(919., 708., 270., 546.)),
+            // Keep the capital-ship crops inside the painted silhouettes. The
+            // old atlas rectangles included neighbouring transparent padding
+            // and a sliver of the adjacent hull, which could show as a stray
+            // triangular fragment near the lower-left of the playfield.
+            Hull::Destroyer => (&self.rebel, Rect::new(470., 770., 300., 460.)),
+            Hull::Executor => (&self.rebel, Rect::new(940., 730., 220., 510.)),
             Hull::DeathStar => (&self.stations, Rect::new(0., 0., 887., 887.)),
             Hull::DeathStar2 => (&self.stations, Rect::new(887., 0., 887., 887.)),
         };
