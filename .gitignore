@@ -1,0 +1,11 @@
+/target/
+*.log
+*.exe
+/*preview*.png
+/preview-*.png
+/diagnose-mobile.cjs
+/verify-web.cjs
+/publish-pages.cjs
+/assets/endor.png
+/assets/space.png
+/rust-*.png

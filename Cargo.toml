@@ -1,0 +1,21 @@
+[package]
+name = "starfighter"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+macroquad = { version = "0.4", features = ["audio"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
+
+[[bin]]
+name = "starfighter"
+path = "src/main.rs"
+
+[[bin]]
+name = "starfighter-server"
+path = "src/server.rs"
+

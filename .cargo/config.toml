@@ -1,0 +1,6 @@
+[target.x86_64-pc-windows-gnu]
+linker = "gcc"
+
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=--import-undefined"]
+
