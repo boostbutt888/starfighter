@@ -187,12 +187,46 @@ fn pickup() -> Vec<u8> {
 async fn sound(bytes: Vec<u8>) -> Option<Sound> {
     load_sound_from_bytes(&bytes).await.ok()
 }
+fn closing_fanfare() -> Vec<u8> {
+    let rate = 22050.;
+    let duration = 13.;
+    let notes = [
+        70, 74, 77, 82, 77, 82, 86, 89, 86, 82, 77, 74, 70, 74, 77, 82,
+    ];
+    let mut out = Vec::new();
+    for i in 0..(rate * duration) as usize {
+        let t = i as f32 / rate;
+        let step = (t / 0.5) as usize;
+        let n = notes[step.min(15)];
+        let phase = TAU * frequency(n) * t;
+        let sustain = if t > 7.5 {
+            ((13. - t) / 5.5).max(0.)
+        } else {
+            1.
+        };
+        let envelope = if step < 15 {
+            ((t % 0.5) * 20.).min(1.)
+        } else {
+            1.
+        };
+        let brass = phase.sin() + 0.4 * (phase * 2.).sin() + 0.22 * (phase * 3.).sin();
+        let mut v = brass * 0.16 * envelope;
+        for n in [46, 58, 62, 65, 70] {
+            v += (TAU * frequency(n) * t).sin() * 0.04;
+        }
+        let beat = t % 0.5;
+        v += (TAU * (70. * beat - 30. * beat * beat)).sin() * (-beat * 12.).exp() * 0.16;
+        out.push(v * sustain * (t / 0.04).min(1.));
+    }
+    wav(&out, rate as u32)
+}
 fn play(s: &Option<Sound>, volume: f32, looped: bool) {
     if let Some(s) = s {
         play_sound(s, PlaySoundParams { looped, volume })
     }
 }
 pub struct Audio {
+    fanfare: Option<Sound>,
     flight: Option<Sound>,
     boss: Option<Sound>,
     laser: Option<Sound>,
@@ -203,11 +237,12 @@ pub struct Audio {
     pickup: Option<Sound>,
     pub music: bool,
     pub effects: bool,
-    playing: Option<bool>,
+    playing: Option<u8>,
 }
 impl Audio {
     pub async fn new() -> Self {
         Self {
+            fanfare: sound(closing_fanfare()).await,
             flight: sound(score(false)).await,
             boss: sound(score(true)).await,
             laser: sound(laser(false, false)).await,
@@ -221,18 +256,35 @@ impl Audio {
             playing: None,
         }
     }
-    pub fn update(&mut self, events: &[Event], boss: bool, active: bool) {
+    pub fn update(&mut self, events: &[Event], boss: bool, active: bool, victory: bool) {
         let wanted = if self.music && active {
-            Some(boss)
+            Some(if victory {
+                2
+            } else if boss {
+                1
+            } else {
+                0
+            })
         } else {
             None
         };
         if self.playing != wanted {
-            for s in [&self.flight, &self.boss].into_iter().flatten() {
+            for s in [&self.flight, &self.boss, &self.fanfare]
+                .into_iter()
+                .flatten()
+            {
                 stop_sound(s)
             }
             if let Some(b) = wanted {
-                play(if b { &self.boss } else { &self.flight }, 0.35, true)
+                play(
+                    match b {
+                        2 => &self.fanfare,
+                        1 => &self.boss,
+                        _ => &self.flight,
+                    },
+                    0.35,
+                    b != 2,
+                )
             }
             self.playing = wanted
         }

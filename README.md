@@ -43,6 +43,8 @@ Glowing blue **THE FORCE** pickups restore 35 Force, capped at 150. Bombs are ca
 
 Boss command centers and Jabba fire red starbursts from the start, doubling their firing rate after that ship loses all turrets. TIE bombers fire aimed lasers. Anchored ground cannons scroll with terrain; space missions use satellite turrets in their place.
 
+When no reserve wingmen remain, the final fighter loss zooms into the ship, then explodes into textured hull fragments before displaying "Rebellion will Endure". Completing the campaign and defeating the surprise fleet instead triggers a Rebel starbase landing with a closing fanfare, followed by the victorious pilot being celebrated in the hangar.
+
 ## Five missions
 
 | Mission | Boss | Turrets |

@@ -44,6 +44,8 @@ fn conf() -> Conf {
     }
 }
 struct Art {
+    landing: Texture2D,
+    celebration: Texture2D,
     menu: Texture2D,
     bosses: Vec<Texture2D>,
     title: Texture2D,
@@ -167,6 +169,8 @@ fn boss_textures() -> Vec<Texture2D> {
 impl Art {
     fn new() -> Self {
         let a = Self {
+            landing: texture!("rebel-starbase.png"),
+            celebration: texture!("rebel-celebration.png"),
             bosses: boss_textures(),
             title: texture!("title.png"),
             menu: texture!("menu-action.png"),
@@ -195,9 +199,16 @@ impl Art {
         for t in [&a.rebel, &a.imperial, &a.stations] {
             t.set_filter(FilterMode::Nearest)
         }
-        for t in [&a.title, &a.menu, &a.barge, &a.turrets]
-            .into_iter()
-            .chain(a.backgrounds.iter())
+        for t in [
+            &a.title,
+            &a.menu,
+            &a.barge,
+            &a.turrets,
+            &a.landing,
+            &a.celebration,
+        ]
+        .into_iter()
+        .chain(a.backgrounds.iter())
         {
             t.set_filter(FilterMode::Linear)
         }
@@ -473,6 +484,8 @@ impl TouchState {
 }
 #[derive(Clone, Copy, PartialEq)]
 enum Screen {
+    Landing,
+    Celebration,
     Dying,
     Intro,
     Menu,
@@ -1062,6 +1075,109 @@ fn draw_game(a: &Art, g: &Game) {
         false,
     );
 }
+fn draw_victory(a: &Art, app: &App) {
+    let t = app.game.age;
+    let landing = app.screen == Screen::Landing;
+    let backdrop = if landing { &a.landing } else { &a.celebration };
+    draw_texture_ex(
+        backdrop,
+        0.,
+        0.,
+        WHITE,
+        DrawTextureParams {
+            dest_size: Some(vec2(W, H)),
+            ..Default::default()
+        },
+    );
+    if landing {
+        let approach = (t / 5.5).clamp(0., 1.);
+        let ease = 1. - (1. - approach).powi(3);
+        let p = vec2(W / 2., H + 90. - (H + 90. - H * 0.39) * ease);
+        let size = 92. - approach * 38.;
+        draw_ellipse(
+            p.x + 6.,
+            p.y + 12.,
+            size * 0.45,
+            size * 0.55,
+            0.,
+            BLACK.with_alpha(0.25),
+        );
+        a.craft(app.game.craft, p, size, 0., WHITE);
+        if t < 5.5 {
+            for x in [-size * 0.14, size * 0.14] {
+                draw_ellipse(
+                    p.x + x,
+                    p.y + size * 0.32,
+                    3.,
+                    9. + (t * 38.).sin() * 2.,
+                    0.,
+                    BLUE.with_alpha(1. - approach * 0.8),
+                );
+            }
+        }
+        draw_rectangle(0., H - 105., W, 105., INK.with_alpha(0.8));
+        a.label(
+            if t < 5.5 {
+                "REBEL STARBASE / CLEARED TO LAND"
+            } else {
+                "WELCOME HOME, STARFIGHTER"
+            },
+            vec2(W / 2., H - 67.),
+            24.,
+            GOLD,
+            true,
+            true,
+        );
+        a.label(
+            &format!("{} / CAMPAIGN COMPLETE", app.game.craft.name()),
+            vec2(W / 2., H - 36.),
+            15.,
+            CREAM,
+            true,
+            false,
+        );
+        if t < 0.7 {
+            draw_rectangle(0., 0., W, H, BLACK.with_alpha(1. - t / 0.7));
+        }
+    } else {
+        draw_rectangle(0., H - 170., W, 170., INK.with_alpha(0.83));
+        a.label(
+            "VICTORY FOR THE REBELLION",
+            vec2(W / 2., H - 120.),
+            34.,
+            GOLD,
+            true,
+            true,
+        );
+        a.label(
+            "THE GALAXY HAS HOPE",
+            vec2(W / 2., H - 86.),
+            19.,
+            CREAM,
+            true,
+            true,
+        );
+        a.label(
+            &format!("{} / SCORE {:07}", app.game.craft.name(), app.game.score),
+            vec2(W / 2., H - 54.),
+            15.,
+            BLUE,
+            true,
+            false,
+        );
+        a.label(
+            "TAP OR ENTER TO RETURN TO HANGAR",
+            vec2(W / 2., H - 23.),
+            12.,
+            CREAM,
+            true,
+            false,
+        );
+        if t < 1. {
+            draw_rectangle(0., 0., W, H, BLACK.with_alpha(1. - t));
+        }
+    }
+}
 fn draw_final_loss(a: &Art, g: &Game) {
     let t = g.age;
     let p = g.player;
@@ -1452,10 +1568,29 @@ async fn main() {
                         app.screen = if app.game.phase == Phase::Lost {
                             Screen::Dying
                         } else {
-                            Screen::End
+                            Screen::Landing
                         };
                         app.game.shake = 0.
                     }
+                }
+            }
+            Screen::Landing => {
+                app.game.events.clear();
+                app.game.age += dt;
+                if app.game.age >= 8. {
+                    app.screen = Screen::Celebration;
+                    app.game.age = 0.;
+                }
+            }
+            Screen::Celebration => {
+                app.game.events.clear();
+                app.game.age += dt;
+                if app.game.age > 1.
+                    && (is_key_pressed(KeyCode::Enter)
+                        || is_key_pressed(KeyCode::Space)
+                        || !act.menu_points.is_empty())
+                {
+                    app.screen = Screen::Menu;
                 }
             }
             Screen::Dying => {
@@ -1541,6 +1676,15 @@ async fn main() {
                             });
                         }
                     }
+                    if scene == 13 || scene == 14 {
+                        app.game.phase = Phase::Won;
+                        app.game.age = if scene == 13 { 5.8 } else { 2. };
+                        app.screen = if scene == 13 {
+                            Screen::Landing
+                        } else {
+                            Screen::Celebration
+                        };
+                    }
                 }
             }
         }
@@ -1559,13 +1703,16 @@ async fn main() {
             },
             boss,
             active,
+            matches!(app.screen, Screen::Landing | Screen::Celebration),
         );
         set_camera(&Camera2D {
             render_target: Some(target.clone()),
             ..Camera2D::from_display_rect(Rect::new(0., 0., W, scene_height))
         });
         clear_background(INK);
-        if app.screen == Screen::Intro {
+        if matches!(app.screen, Screen::Landing | Screen::Celebration) {
+            draw_victory(&art, &app);
+        } else if app.screen == Screen::Intro {
             draw_intro(&art, app.intro_age);
         } else if app.screen == Screen::Menu {
             draw_menu(&art, &app, &audio, get_time() as f32)
@@ -1639,7 +1786,7 @@ async fn main() {
                     if app.game.phase == Phase::Won {
                         "THE GALAXY HAS HOPE."
                     } else {
-                        "THE REBELLION ENDURES."
+                        "Rebellion will Endure"
                     },
                     vec2(300., 355.),
                     48.,
@@ -1705,7 +1852,7 @@ async fn main() {
         }
         if capture {
             capture_frame += 1;
-            if capture_frame >= 52 {
+            if capture_frame >= 60 {
                 break;
             }
         }
@@ -1717,6 +1864,8 @@ async fn main() {
                 Screen::Pause => 2,
                 Screen::End => 3,
                 Screen::Dying => 4,
+                Screen::Landing => 5,
+                Screen::Celebration => 6,
             };
             STATUS.store(
                 screen
