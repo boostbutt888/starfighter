@@ -844,7 +844,9 @@ fn draw_game(a: &Art, g: &Game) {
                     "IMPERIAL FLEET"
                 },
                 g.guns_left(),
-                if shield {
+                if !g.fleet_ready() {
+                    "POSITIONING / SHIELDS ACTIVE"
+                } else if shield {
                     "DESTROY ALL GUNS FIRST"
                 } else {
                     "COMMAND TARGETS EXPOSED"

@@ -168,6 +168,12 @@ pub struct BossShip {
     pub dead: bool,
 }
 impl BossShip {
+    pub fn arrival_y(&self) -> f32 {
+        60. + self.size.y / 2.
+    }
+    pub fn in_position(&self) -> bool {
+        self.p.y >= self.arrival_y() - 0.01
+    }
     pub fn mass(&self) -> f32 {
         self.max + self.guns.iter().map(|g| g.max).sum::<f32>()
     }
@@ -718,7 +724,13 @@ impl Game {
             .map(|b| b.guns.iter().filter(|g| g.hp > 0.).count())
             .sum()
     }
+    pub fn fleet_ready(&self) -> bool {
+        !self.fleet.is_empty() && self.fleet.iter().all(|b| b.dead || b.in_position())
+    }
     pub fn gun_hit(&mut self, bi: usize, gi: usize, damage: f32) {
+        if !self.fleet_ready() {
+            return;
+        }
         let b = &mut self.fleet[bi];
         let g = &mut b.guns[gi];
         if g.hp <= 0. {
@@ -744,7 +756,7 @@ impl Game {
         }
     }
     pub fn bridge_hit(&mut self, bi: usize, damage: f32) {
-        if self.guns_left() > 0 || self.fleet[bi].dead {
+        if !self.fleet_ready() || self.guns_left() > 0 || self.fleet[bi].dead {
             return;
         }
         let b = &mut self.fleet[bi];
@@ -844,7 +856,7 @@ impl Game {
             if b.dead {
                 continue;
             }
-            let target_y = 60. + b.size.y / 2.;
+            let target_y = b.arrival_y();
             b.p.y = (b.p.y + 150. * dt).min(target_y);
             b.p.x = b.base + (b.age * 0.6 + b.seed).sin() * if self.stage < 2 { 45. } else { 12. };
             for g in &mut b.guns {
@@ -1232,7 +1244,7 @@ mod tests {
         let hp = g.fleet[0].hp;
         g.bridge_hit(0, 9999.);
         assert_eq!(g.fleet[0].hp, hp);
-        g.fleet[0].p.y = 265.;
+        g.fleet[0].p.y = g.fleet[0].arrival_y();
         let angle = g.fleet[0].guns[0].angle;
         g.player.x = 550.;
         g.fleet_update(0.2);
@@ -1257,6 +1269,7 @@ mod tests {
         g.stage = 4;
         g.start_boss(false);
         for b in &mut g.fleet {
+            b.p.y = b.arrival_y();
             for gun in &mut b.guns {
                 gun.hp = 0.
             }
@@ -1271,6 +1284,7 @@ mod tests {
             vec![Hull::Destroyer, Hull::Executor, Hull::Destroyer]
         );
         for b in &mut g.fleet {
+            b.p.y = b.arrival_y();
             for gun in &mut b.guns {
                 gun.hp = 0.
             }
@@ -1396,5 +1410,43 @@ mod tests {
         }
         g.update(0.02, Input::default());
         assert_eq!(g.phase, Phase::Clear);
+    }
+    #[test]
+    fn incoming_fleets_ignore_lasers_and_bombs_until_every_ship_is_positioned() {
+        let mut g = game();
+        g.stage = 3;
+        g.start_boss(false);
+        let armor: Vec<_> = g.fleet.iter().map(|b| (b.hp, b.guns[0].hp)).collect();
+        for i in 0..g.fleet.len() {
+            g.gun_hit(i, 0, 9999.);
+            g.bridge_hit(i, 9999.);
+        }
+        g.detonate(vec2(300., 200.));
+        for (b, (hp, gun)) in g.fleet.iter().zip(&armor) {
+            assert_eq!(b.hp, *hp);
+            assert_eq!(b.guns[0].hp, *gun);
+        }
+        for b in &mut g.fleet {
+            b.p.y = b.arrival_y();
+        }
+        g.fleet[1].p.y -= 1.;
+        g.gun_hit(0, 0, 1.);
+        assert_eq!(g.fleet[0].guns[0].hp, armor[0].1);
+        g.fleet[1].p.y = g.fleet[1].arrival_y();
+        assert!(g.fleet_ready());
+        g.gun_hit(0, 0, 1.);
+        assert_eq!(g.fleet[0].guns[0].hp, armor[0].1 - 1.);
+        for b in &mut g.fleet {
+            for gun in &mut b.guns {
+                gun.hp = 0.;
+            }
+        }
+        let hp = g.fleet[0].hp;
+        g.fleet[1].p.y -= 1.;
+        g.bridge_hit(0, 1.);
+        assert_eq!(g.fleet[0].hp, hp);
+        g.fleet[1].p.y = g.fleet[1].arrival_y();
+        g.bridge_hit(0, 1.);
+        assert_eq!(g.fleet[0].hp, hp - 1.);
     }
 }
