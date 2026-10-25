@@ -90,7 +90,17 @@ const CHORDS: [[i32; 4]; 8] = [
     [45, 52, 57, 61],
     [45, 52, 55, 61],
 ];
-/// "Dawn of the Rebellion": an original 16-bar heroic space-adventure march.
+// A synthesized main-theme arrangement, with a separate minor-key tension cue.
+const MAIN_THEME: [[i32; 8]; 8] = [
+    [70, 70, 70, 77, 77, 77, 82, 82],
+    [80, 79, 77, 89, 89, 89, 82, 82],
+    [80, 79, 77, 89, 89, 89, 82, 82],
+    [80, 79, 80, 77, 77, 77, 70, 70],
+    [70, 70, 70, 77, 77, 77, 82, 82],
+    [80, 79, 77, 89, 89, 89, 82, 82],
+    [80, 79, 77, 89, 89, 89, 82, 82],
+    [80, 79, 80, 77, 77, 77, 0, 0],
+];
 fn score(boss: bool) -> Vec<u8> {
     let rate = 22050.;
     let unit = 60. / if boss { 138. } else { 118. } / 2.;
@@ -104,8 +114,16 @@ fn score(boss: bool) -> Vec<u8> {
         let bar = (step / 8) % 16;
         let beat = step % 8;
         let nt = eighth.fract();
-        let note = MELODY[bar][beat];
-        let chord = CHORDS[bar % 8];
+        let note = if boss {
+            MELODY[bar][beat] - 12
+        } else {
+            MAIN_THEME[bar % 8][beat]
+        };
+        let chord = if boss {
+            CHORDS[bar % 8]
+        } else {
+            [46, 53, 58, 62]
+        };
         let mut v = 0.;
         if note > 0 {
             let f = frequency(note);

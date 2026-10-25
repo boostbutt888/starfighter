@@ -475,7 +475,7 @@ impl Game {
                         2.,
                         if count > 1 { 0.7 } else { 1. },
                         false,
-                        false,
+                        true,
                         1,
                     )
                 }

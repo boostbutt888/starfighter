@@ -42,3 +42,11 @@ Jabba's Khetanna sail barge isolated on transparency, directly overhead orthogra
 ## turrets.png
 
 Transparent three-cell horizontal atlas, all directly overhead with barrels pointing up. Imperial twin turbolaser with gray octagonal housing and circular base; rustic brown single-barrel sail-barge laser turret; dark-gray Death Star quad turbolaser. Intricate physically based movie-prop metal and greebles, isolated centered objects, no labels or text.
+# Menu artwork refresh — v0.3.0
+
+Built-in imagegen generated `menu-action.png` with this prompt:
+
+> Use case: illustration-story. Asset: high resolution portrait 2:3 game main menu background, no text. A confident adult anime-style female Rebel starfighter pilot in orange flight suit with white vest, helmet tucked under arm, upper left foreground; detailed X-wing banking dynamically across upper right and center, green laser bolts, TIE fighters and luminous blue nebula in space. Polished cinematic anime key visual with realistic mechanical spaceship detailing, dramatic rim light. Pilot and X-wing fully visible within top two-thirds, lower third dark space with subtle stars for UI overlay. No lettering, logos, frames, watermarks.
+
+Boss sprites are now extracted into individual textures at load time. Only the largest connected alpha silhouette is kept, removing disconnected pieces of neighboring sprites in the original atlas. Death Stars remain unrotated; capital hulls face down; Jabba's portrait is counter-rotated independently.
+

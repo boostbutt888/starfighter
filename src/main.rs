@@ -44,6 +44,8 @@ fn conf() -> Conf {
     }
 }
 struct Art {
+    menu: Texture2D,
+    bosses: Vec<Texture2D>,
     title: Texture2D,
     rebel: Texture2D,
     imperial: Texture2D,
@@ -63,10 +65,111 @@ macro_rules! texture {
         )
     };
 }
+// Isolate each boss onto its own texture and remove disconnected atlas debris.
+// Filtering cannot remove actual opaque pixels from a neighboring sprite.
+fn isolate_component(mut image: Image) -> Image {
+    let w = image.width as usize;
+    let h = image.height as usize;
+    let mut visited = vec![false; w * h];
+    let mut largest = Vec::new();
+    for start in 0..w * h {
+        if visited[start] || image.bytes[start * 4 + 3] < 24 {
+            continue;
+        }
+        visited[start] = true;
+        let mut component = vec![start];
+        let mut cursor = 0;
+        while cursor < component.len() {
+            let i = component[cursor];
+            cursor += 1;
+            let x = i % w;
+            let y = i / w;
+            for (nx, ny) in [
+                (x as isize - 1, y as isize),
+                (x as isize + 1, y as isize),
+                (x as isize, y as isize - 1),
+                (x as isize, y as isize + 1),
+            ] {
+                if nx < 0 || ny < 0 || nx >= w as isize || ny >= h as isize {
+                    continue;
+                }
+                let n = ny as usize * w + nx as usize;
+                if !visited[n] && image.bytes[n * 4 + 3] >= 24 {
+                    visited[n] = true;
+                    component.push(n);
+                }
+            }
+        }
+        if component.len() > largest.len() {
+            largest = component;
+        }
+    }
+    let mut keep = vec![false; w * h];
+    for i in largest {
+        keep[i] = true;
+    }
+    for (i, pixel) in image.bytes.chunks_exact_mut(4).enumerate() {
+        if !keep[i] {
+            pixel.fill(0);
+        }
+    }
+    image
+}
+fn boss_images() -> Vec<Image> {
+    let capital = Image::from_file_with_format(
+        include_bytes!("../assets/rebel-capital-atlas.png"),
+        Some(ImageFormat::Png),
+    )
+    .unwrap();
+    let stations = Image::from_file_with_format(
+        include_bytes!("../assets/death-stars.png"),
+        Some(ImageFormat::Png),
+    )
+    .unwrap();
+    let mut barge = Image::from_file_with_format(
+        include_bytes!("../assets/jabba-barge.png"),
+        Some(ImageFormat::Png),
+    )
+    .unwrap();
+    // Counter-rotate the whole throne compartment before the hull is turned
+    // toward the player; this also avoids drawing a second portrait over Jabba.
+    let (left, top, width, height) = (330usize, 1030usize, 360usize, 250usize);
+    let stride = barge.width as usize;
+    let source = barge.bytes.clone();
+    for y in 0..height {
+        for x in 0..width {
+            let dst = ((top + y) * stride + left + x) * 4;
+            let src = ((top + height - 1 - y) * stride + left + width - 1 - x) * 4;
+            barge.bytes[dst..dst + 4].copy_from_slice(&source[src..src + 4]);
+        }
+    }
+    [
+        barge.sub_image(Rect::new(65., 0., 890., 1536.)),
+        capital.sub_image(Rect::new(445., 750., 365., 504.)),
+        capital.sub_image(Rect::new(919., 708., 270., 546.)),
+        stations.sub_image(Rect::new(0., 0., 887., 887.)),
+        stations.sub_image(Rect::new(887., 0., 887., 887.)),
+    ]
+    .into_iter()
+    .map(isolate_component)
+    .collect()
+}
+fn boss_textures() -> Vec<Texture2D> {
+    boss_images()
+        .into_iter()
+        .map(|clean| {
+            let t = Texture2D::from_image(&clean);
+            t.set_filter(FilterMode::Linear);
+            t
+        })
+        .collect()
+}
 impl Art {
     fn new() -> Self {
         let a = Self {
+            bosses: boss_textures(),
             title: texture!("title.png"),
+            menu: texture!("menu-action.png"),
             rebel: texture!("rebel-capital-atlas.png"),
             imperial: texture!("imperial-top-atlas.png"),
             stations: texture!("death-stars.png"),
@@ -92,7 +195,7 @@ impl Art {
         for t in [&a.rebel, &a.imperial, &a.stations] {
             t.set_filter(FilterMode::Nearest)
         }
-        for t in [&a.title, &a.barge, &a.turrets]
+        for t in [&a.title, &a.menu, &a.barge, &a.turrets]
             .into_iter()
             .chain(a.backgrounds.iter())
         {
@@ -160,18 +263,27 @@ impl Art {
         )
     }
     fn hull(&self, b: &BossShip, color: Color) {
-        let (t, r) = match b.kind {
-            Hull::Barge => (&self.barge, Rect::new(65., 0., 890., 1536.)),
-            // Keep the capital-ship crops inside the painted silhouettes. The
-            // old atlas rectangles included neighbouring transparent padding
-            // and a sliver of the adjacent hull, which could show as a stray
-            // triangular fragment near the lower-left of the playfield.
-            Hull::Destroyer => (&self.rebel, Rect::new(470., 770., 300., 460.)),
-            Hull::Executor => (&self.rebel, Rect::new(940., 730., 220., 510.)),
-            Hull::DeathStar => (&self.stations, Rect::new(0., 0., 887., 887.)),
-            Hull::DeathStar2 => (&self.stations, Rect::new(887., 0., 887., 887.)),
+        let index = match b.kind {
+            Hull::Barge => 0,
+            Hull::Destroyer => 1,
+            Hull::Executor => 2,
+            Hull::DeathStar => 3,
+            Hull::DeathStar2 => 4,
         };
-        self.image(t, r, b.p, b.size, PI, color)
+        let t = &self.bosses[index];
+        let angle = if matches!(b.kind, Hull::DeathStar | Hull::DeathStar2) {
+            0.
+        } else {
+            PI
+        };
+        self.image(
+            t,
+            Rect::new(0., 0., t.width(), t.height()),
+            b.p,
+            b.size,
+            angle,
+            color,
+        );
     }
     fn backdrop(&self, stage: usize, time: f32, height: f32, approach: f32) {
         let t = &self.backgrounds[stage];
@@ -336,6 +448,7 @@ enum Screen {
     End,
 }
 struct App {
+    intro_age: f32,
     screen: Screen,
     craft: usize,
     difficulty: usize,
@@ -347,6 +460,7 @@ struct App {
 impl App {
     fn new() -> Self {
         Self {
+            intro_age: 0.,
             screen: Screen::Intro,
             craft: 0,
             difficulty: 1,
@@ -368,16 +482,16 @@ impl App {
     }
 }
 fn card(i: usize) -> Rect {
-    Rect::new(32. + i as f32 * 181., 340., 174., 164.)
+    Rect::new(32. + i as f32 * 181., 542., 174., 86.)
 }
 fn rating(i: usize) -> Rect {
-    Rect::new(32. + i as f32 * 181., 538., 174., 48.)
+    Rect::new(32. + i as f32 * 181., 650., 174., 36.)
 }
 fn deployment() -> Rect {
-    Rect::new(32., 610., 536., 64.)
+    Rect::new(32., 696., 536., 48.)
 }
 fn launch() -> Rect {
-    Rect::new(32., 702., 536., 58.)
+    Rect::new(32., 754., 536., 44.)
 }
 fn music_rect() -> Rect {
     Rect::new(330., 25., 112., 33.)
@@ -391,17 +505,16 @@ fn panel(r: Rect, border: Color, fill: Color) {
 }
 fn draw_menu(a: &Art, app: &App, au: &audio::Audio, time: f32) {
     draw_texture_ex(
-        &a.title,
-        -590.,
+        &a.menu,
+        0.,
         0.,
         WHITE,
         DrawTextureParams {
-            dest_size: Some(vec2(1960., 840.)),
+            dest_size: Some(vec2(W, 900.)),
             ..Default::default()
         },
     );
-    draw_rectangle(0., 0., W, H, Color::new(0.015, 0.03, 0.04, 0.55));
-    draw_rectangle(0., 300., W, 540., Color::new(0.015, 0.03, 0.04, 0.58));
+    draw_rectangle(0., 530., W, 310., Color::new(0.015, 0.03, 0.04, 0.35));
     a.label("REBEL COMMAND", vec2(32., 47.), 17., GOLD, false, false);
     a.label(
         "A GALAXY UNDER SIEGE. A REBELLION RISING.",
@@ -411,11 +524,10 @@ fn draw_menu(a: &Art, app: &App, au: &audio::Audio, time: f32) {
         false,
         false,
     );
-    a.label("STAR", vec2(30., 194.), 112., CREAM, false, true);
-    a.label("FIGHTER", vec2(30., 287.), 112., GOLD, false, true);
+    a.label("STARFIGHTER", vec2(30., 480.), 68., GOLD, false, true);
     a.label(
         "The odds are impossible. Fly anyway.",
-        vec2(34., 318.),
+        vec2(34., 514.),
         17.,
         CREAM,
         false,
@@ -433,17 +545,11 @@ fn draw_menu(a: &Art, app: &App, au: &audio::Audio, time: f32) {
             },
             Color::new(0.025, 0.055, 0.08, 0.78),
         );
-        a.craft(
-            Craft::ALL[i],
-            vec2(r.x + r.w / 2., r.y + 53.),
-            77.,
-            0.,
-            WHITE,
-        );
+        a.craft(Craft::ALL[i], vec2(r.x + 28., r.y + 27.), 42., 0., WHITE);
         a.label(
             Craft::ALL[i].name(),
-            vec2(r.x + 12., r.y + 109.),
-            22.,
+            vec2(r.x + 57., r.y + 33.),
+            20.,
             if selected { GOLD } else { CREAM },
             false,
             true,
@@ -454,7 +560,7 @@ fn draw_menu(a: &Art, app: &App, au: &audio::Audio, time: f32) {
                 "HEAVY / NOSE CANNONS",
                 "FAST / EDGE CANNONS",
             ][i],
-            vec2(r.x + 12., r.y + 130.),
+            vec2(r.x + 12., r.y + 59.),
             10.,
             CREAM,
             false,
@@ -462,14 +568,14 @@ fn draw_menu(a: &Art, app: &App, au: &audio::Audio, time: f32) {
         );
         a.label(
             &format!("BOMBS {}  /  SPEED {}", Craft::ALL[i].bombs(), [3, 2, 5][i]),
-            vec2(r.x + 12., r.y + 149.),
+            vec2(r.x + 12., r.y + 76.),
             11.,
             BLUE,
             false,
             false,
         )
     }
-    a.label("FLIGHT RATING", vec2(32., 526.), 12., GOLD, false, false);
+    a.label("FLIGHT RATING", vec2(32., 644.), 11., GOLD, false, false);
     for i in 0..3 {
         let r = rating(i);
         panel(
@@ -479,7 +585,7 @@ fn draw_menu(a: &Art, app: &App, au: &audio::Audio, time: f32) {
         );
         a.label(
             Difficulty::ALL[i].name(),
-            vec2(r.x + r.w / 2., r.y + 30.),
+            vec2(r.x + r.w / 2., r.y + 25.),
             20.,
             if i == app.difficulty { GOLD } else { CREAM },
             true,
@@ -494,7 +600,7 @@ fn draw_menu(a: &Art, app: &App, au: &audio::Audio, time: f32) {
     );
     a.label(
         "Q / E     DEPLOYMENT     TAP LEFT / RIGHT TO CHANGE",
-        vec2(300., r.y + 18.),
+        vec2(300., r.y + 13.),
         11.,
         BLUE,
         true,
@@ -506,8 +612,8 @@ fn draw_menu(a: &Art, app: &App, au: &audio::Audio, time: f32) {
             app.stage + 1,
             MISSIONS[app.stage].to_uppercase()
         ),
-        vec2(300., r.y + 46.),
-        22.,
+        vec2(300., r.y + 36.),
+        19.,
         CREAM,
         true,
         true,
@@ -516,7 +622,7 @@ fn draw_menu(a: &Art, app: &App, au: &audio::Audio, time: f32) {
     draw_rectangle(r.x, r.y, r.w, r.h, GOLD);
     a.label(
         "LAUNCH CAMPAIGN",
-        vec2(300., r.y + 38.),
+        vec2(300., r.y + 30.),
         27.,
         INK,
         true,
@@ -524,16 +630,20 @@ fn draw_menu(a: &Art, app: &App, au: &audio::Audio, time: f32) {
     );
     a.label(
         "WASD / ARROWS  MOVE     SPACE / Z  FIRE     X / B  BOMB",
-        vec2(300., 791.),
-        12.,
+        vec2(300., 815.),
+        10.,
         CREAM,
         true,
         false,
     );
     a.label(
-        "C / TAB  SWAP    SHIFT  PRECISION    P / ESC  PAUSE    F11  FULLSCREEN",
-        vec2(300., 813.),
-        11.,
+        &format!(
+            "v{} / BUILD {}",
+            env!("CARGO_PKG_VERSION"),
+            env!("STARFIGHTER_BUILD")
+        ),
+        vec2(300., 834.),
+        10.,
         CREAM,
         true,
         false,
@@ -741,7 +851,11 @@ fn draw_game(a: &Art, g: &Game) {
         let color = if p.enemy {
             Color::new(1., 0.16, 0.06, 1.)
         } else {
-            craft_color(g.craft)
+            if p.green {
+                Color::new(0.2, 1., 0.4, 1.)
+            } else {
+                BLUE
+            }
         };
         let end = p.p - p.v.normalize_or_zero() * if p.enemy { 13. } else { 19. };
         for j in (1..=3).rev() {
@@ -976,44 +1090,68 @@ fn draw_controls(a: &Art, v: View, app: &App, au: &audio::Audio) {
     }
 }
 fn draw_intro(a: &Art, time: f32) {
-    draw_texture_ex(
-        &a.backgrounds[2],
-        0.,
-        0.,
-        WHITE,
-        DrawTextureParams {
-            dest_size: Some(vec2(W, H)),
-            ..Default::default()
-        },
+    clear_background(Color::from_hex(0x080e12));
+    let fade = (time / 0.7).clamp(0., 1.) * ((3.6 - time) / 0.65).clamp(0., 1.);
+    let y = H / 2. - 47. - (1. - (time / 0.9).clamp(0., 1.)).powi(3) * 12.;
+    let green = Color::new(0.57, 0.72, 0.53, fade);
+    let dark = Color::new(0.15, 0.24, 0.18, fade);
+    let p = vec2(W / 2., y);
+    draw_triangle(
+        p + vec2(-22., -9.),
+        p + vec2(-72., -20.),
+        p + vec2(-34., 13.),
+        green,
     );
-    draw_rectangle(0., 0., W, H, Color::new(0.01, 0.03, 0.05, 0.52));
-    a.label("DAGOBAH VENTURES", vec2(300., 285.), 46., GOLD, true, true);
+    draw_triangle(
+        p + vec2(22., -9.),
+        p + vec2(72., -20.),
+        p + vec2(34., 13.),
+        green,
+    );
+    draw_triangle(
+        p + vec2(-31., -7.),
+        p + vec2(-58., -15.),
+        p + vec2(-34., 4.),
+        dark,
+    );
+    draw_triangle(
+        p + vec2(31., -7.),
+        p + vec2(58., -15.),
+        p + vec2(34., 4.),
+        dark,
+    );
+    draw_ellipse(p.x, p.y, 31., 30., 0., green);
+    draw_ellipse(p.x - 12., p.y, 7., 4., -8., dark);
+    draw_ellipse(p.x + 12., p.y, 7., 4., 8., dark);
+    draw_line(p.x - 17., p.y - 9., p.x - 5., p.y - 7., 1.8, dark);
+    draw_line(p.x + 17., p.y - 9., p.x + 5., p.y - 7., 1.8, dark);
+    draw_line(p.x - 8., p.y - 19., p.x + 8., p.y - 19., 1., dark);
+    draw_line(p.x - 5., p.y + 15., p.x + 5., p.y + 15., 1.2, dark);
+    draw_triangle(p + vec2(0., 4.), p + vec2(-3., 9.), p + vec2(3., 9.), dark);
     a.label(
-        "A STARFIGHTER CAMPAIGN",
-        vec2(300., 330.),
-        18.,
-        CREAM,
+        "Dagobah Ventures",
+        vec2(W / 2., y + 88.),
+        32.,
+        Color::new(0.88, 0.91, 0.88, fade),
         true,
-        true,
+        false,
+    );
+    draw_line(
+        W / 2. - 19.,
+        y + 115.,
+        W / 2. + 19.,
+        y + 115.,
+        1.,
+        Color::new(0.57, 0.72, 0.53, fade * 0.6),
     );
     a.label(
-        "THE REBELLION FLIES WHERE OTHERS FEAR TO GO",
-        vec2(300., 388.),
-        13.,
-        CREAM,
+        "TAP OR ENTER TO SKIP",
+        vec2(W / 2., H - 45.),
+        10.,
+        Color::new(0.6, 0.65, 0.65, fade * 0.45),
         true,
-        true,
+        false,
     );
-    if time.sin() > -0.2 {
-        a.label(
-            "TAP OR PRESS ENTER TO BEGIN",
-            vec2(300., 610.),
-            15.,
-            BLUE,
-            true,
-            true,
-        );
-    }
 }
 fn input_keys(a: &mut Actions) {
     a.input.movement = vec2(
@@ -1133,9 +1271,12 @@ async fn main() {
         }
         match app.screen {
             Screen::Intro => {
-                if is_key_pressed(KeyCode::Enter)
-                    || is_key_pressed(KeyCode::Space)
-                    || !act.menu_points.is_empty()
+                app.intro_age += dt;
+                if app.intro_age >= 3.6
+                    || (app.intro_age > 0.4
+                        && (is_key_pressed(KeyCode::Enter)
+                            || is_key_pressed(KeyCode::Space)
+                            || !act.menu_points.is_empty()))
                 {
                     app.screen = Screen::Menu;
                     app.touch.enabled = false;
@@ -1231,12 +1372,13 @@ async fn main() {
             let scene = capture_frame / 4;
             if capture_frame % 4 == 0 {
                 app = App::new();
+                app.screen = Screen::Menu;
                 if scene > 0 {
                     app.start();
                     app.game.stage = (scene - 1).min(4);
                     app.game.start_boss(scene == 6);
                     for b in &mut app.game.fleet {
-                        b.p.y = if b.kind == Hull::Barge { 265. } else { 255. }
+                        b.p.y = b.arrival_y();
                     }
                     app.game.notice_age = 0.;
                     app.game.inv = 0.;
@@ -1255,8 +1397,12 @@ async fn main() {
             }
         }
         let active = app.music_started && app.screen != Screen::Pause;
-        let boss =
-            matches!(app.game.phase, Phase::Boss | Phase::Ambush) && app.screen == Screen::Play;
+        let boss = app.screen == Screen::Play
+            && (matches!(
+                app.game.phase,
+                Phase::Boss | Phase::Ambush | Phase::FalseVictory
+            ) || (app.game.phase == Phase::Waves
+                && app.game.time >= app.game.boss_arrival_time() - 10.));
         audio.update(
             if app.screen == Screen::Play {
                 &app.game.events
@@ -1272,7 +1418,7 @@ async fn main() {
         });
         clear_background(INK);
         if app.screen == Screen::Intro {
-            draw_intro(&art, get_time() as f32);
+            draw_intro(&art, app.intro_age);
         } else if app.screen == Screen::Menu {
             draw_menu(&art, &app, &audio, get_time() as f32)
         } else {
@@ -1433,6 +1579,23 @@ mod tests {
             assert!(!rating(i).overlaps(&launch()))
         }
         assert!(!deployment().overlaps(&launch()))
+    }
+    #[test]
+    fn boss_atlas_debris_is_removed_and_clean_images_export() {
+        let mut im = Image::gen_image_color(10, 10, Color::new(0., 0., 0., 0.));
+        for x in 2..7 {
+            for y in 2..7 {
+                im.set_pixel(x, y, WHITE);
+            }
+        }
+        im.set_pixel(9, 9, WHITE);
+        let clean = isolate_component(im);
+        assert_eq!(clean.bytes[(9 * 10 + 9) * 4 + 3], 0);
+        assert_eq!(clean.bytes[(4 * 10 + 4) * 4 + 3], 255);
+        std::fs::create_dir_all("target/preview").unwrap();
+        for (i, im) in boss_images().iter().enumerate() {
+            im.export_png(&format!("target/preview/clean-boss-{i}.png"));
+        }
     }
     fn view() -> View {
         View {
