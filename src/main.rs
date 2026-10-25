@@ -739,7 +739,7 @@ fn draw_game(a: &Art, g: &Game) {
     }
     for p in &g.shots {
         let color = if p.enemy {
-            Color::new(0.35, 1., 0.45, 1.)
+            Color::new(1., 0.16, 0.06, 1.)
         } else {
             craft_color(g.craft)
         };

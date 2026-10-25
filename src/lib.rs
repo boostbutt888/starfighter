@@ -54,15 +54,15 @@ impl Difficulty {
     pub fn name(self) -> &'static str {
         match self {
             Self::Rookie => "ROOKIE",
-            Self::Ace => "ACE",
+            Self::Ace => "PILOT",
             Self::Legend => "LEGEND",
         }
     }
     pub fn armor(self) -> f32 {
         match self {
-            Self::Rookie => 0.75,
-            Self::Ace => 1.,
-            Self::Legend => 1.35,
+            Self::Rookie => 2.,
+            Self::Ace => 5.,
+            Self::Legend => 10.,
         }
     }
     pub fn speed(self) -> f32 {
@@ -70,6 +70,13 @@ impl Difficulty {
             Self::Rookie => 0.75,
             Self::Ace => 1.,
             Self::Legend => 1.26,
+        }
+    }
+    pub fn enemy_armor(self) -> f32 {
+        match self {
+            Self::Rookie => 1.,
+            Self::Ace => 2.,
+            Self::Legend => 3.,
         }
     }
     pub fn interval(self) -> f32 {
@@ -436,7 +443,11 @@ impl Game {
             Craft::Xwing => 0.17,
             Craft::Ywing => 0.19,
             Craft::Awing => 0.13,
-        } * if self.weapon == 1 { 1.65 } else { 1. };
+        } * if self.weapon == 1 {
+            1.0 / (1. + (level - 1.).clamp(0., 3.) * 0.18)
+        } else {
+            1.
+        };
         let ports = self.craft.ports();
         for port in ports {
             let p = self.player + vec2(*port, -25.);
@@ -457,7 +468,7 @@ impl Game {
                     1
                 };
                 for n in 0..count {
-                    let a = (n as f32 - (count - 1) as f32 / 2.) * 0.065;
+                    let a = (n as f32 - (count - 1) as f32 / 2.) * 0.0455;
                     self.shot(
                         p,
                         vec2(a.sin() * 610., -a.cos() * 610.),
@@ -576,7 +587,7 @@ impl Game {
                 age,
                 hp: ([3., 3., 12., 6.][kind])
                     * (1. + self.stage as f32 * 0.12)
-                    * self.difficulty.armor(),
+                    * self.difficulty.enemy_armor(),
                 timer,
                 form,
                 seed: self.wave as f32,
@@ -663,13 +674,13 @@ impl Game {
                     vec2(a.cos() * size.x * 0.32, a.sin() * size.y * 0.32)
                 } else if kind == Hull::Barge {
                     vec2(
-                        side * size.x * 0.22,
-                        (-0.34 + row as f32 / (count / 2 - 1) as f32 * 0.68) * size.y,
+                        side * size.x * 0.16,
+                        (-0.28 + row as f32 / (count / 2 - 1) as f32 * 0.56) * size.y,
                     )
                 } else {
                     vec2(
-                        side * size.x * (0.14 + row as f32 * 0.035),
-                        (-0.08 + row as f32 / ((count / 2 - 1) as f32) * 0.4) * size.y,
+                        side * size.x * (0.10 + row as f32 * 0.022),
+                        (-0.03 + row as f32 / ((count / 2 - 1) as f32) * 0.30) * size.y,
                     )
                 };
                 guns.push(Gun {
@@ -898,11 +909,20 @@ impl Game {
                         let a = a + n as f32 * 0.12;
                         queued.push((p, vec2(a.cos(), a.sin()) * 190. * speed, 4.))
                     }
+                    let burst_count = if b.kind == Hull::Barge { 16 } else { 12 };
+                    for n in 0..burst_count {
+                        let a = n as f32 / burst_count as f32 * TAU + b.age * 0.2;
+                        queued.push((
+                            p,
+                            vec2(a.cos(), a.sin()) * (145. + self.stage as f32 * 12.) * speed,
+                            3.5,
+                        ));
+                    }
                 }
             }
         }
         for (p, v, r) in queued {
-            self.shot(p, v, r, 14., true, true, 1)
+            self.shot(p, v, r, 14., true, false, 1)
         }
         self.reinforce -= dt;
         if self.reinforce <= 0. && self.stage > 0 {
@@ -1044,7 +1064,7 @@ impl Game {
             }
         }
         for (p, v) in queued {
-            self.shot(p, v, 3., 14., true, true, 1);
+            self.shot(p, v, 3., 14., true, false, 1);
             self.events.push(Event::Laser(true, false))
         }
         for i in collisions {
@@ -1153,7 +1173,8 @@ impl Game {
                 }
                 PickupKind::Spread | PickupKind::Cannon => {
                     self.weapon = if kind == PickupKind::Spread { 0 } else { 1 };
-                    self.levels[self.weapon] = (self.levels[self.weapon] + 1).min(6);
+                    let cap = if kind == PickupKind::Cannon { 4 } else { 6 };
+                    self.levels[self.weapon] = (self.levels[self.weapon] + 1).min(cap);
                     self.message(
                         format!(
                             "{} UPGRADED / LEVEL {}",
@@ -1219,7 +1240,7 @@ mod tests {
                 g.drop(g.player, PickupKind::Cannon);
                 g.update(0.01, Input::default())
             }
-            assert_eq!(g.levels[1], 6);
+            assert_eq!(g.levels[1], 4);
             assert_eq!(g.weapon, 1)
         }
         assert!(Craft::Awing.speed() > Craft::Xwing.speed());
