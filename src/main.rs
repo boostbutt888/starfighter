@@ -251,7 +251,39 @@ impl Art {
             color,
         )
     }
-    fn enemy(&self, e: &Enemy) {
+    fn enemy(&self, e: &Enemy, space: bool) {
+        if e.kind == 4 {
+            if space {
+                for side in [-1., 1.] {
+                    let x = e.p.x + side * 25.;
+                    draw_rectangle(x - 9., e.p.y - 23., 18., 46., Color::from_hex(0x16344e));
+                    draw_rectangle_lines(x - 9., e.p.y - 23., 18., 46., 1.5, GRAY);
+                    for y in -2..3 {
+                        draw_line(
+                            x - 8.,
+                            e.p.y + y as f32 * 8.,
+                            x + 8.,
+                            e.p.y + y as f32 * 8.,
+                            0.6,
+                            BLUE,
+                        );
+                    }
+                    draw_line(e.p.x, e.p.y, x, e.p.y, 4., GRAY);
+                }
+            } else {
+                draw_circle(e.p.x, e.p.y, 22., DARKGRAY);
+                draw_circle_lines(e.p.x, e.p.y, 22., 2., GRAY);
+            }
+            self.image(
+                &self.turrets,
+                Rect::new(0., 0., 724., 724.),
+                e.p,
+                vec2(38., 38.),
+                e.angle,
+                WHITE,
+            );
+            return;
+        }
         let i = e.kind;
         self.image(
             &self.imperial,
@@ -441,6 +473,7 @@ impl TouchState {
 }
 #[derive(Clone, Copy, PartialEq)]
 enum Screen {
+    Dying,
     Intro,
     Menu,
     Play,
@@ -785,9 +818,9 @@ fn draw_game(a: &Art, g: &Game) {
         )
     }
     for e in &g.enemies {
-        a.enemy(e)
+        a.enemy(e, g.stage == 4)
     }
-    if g.inv <= 0. || (g.inv * 12.) as i32 % 2 == 0 {
+    if g.phase != Phase::Lost && (g.inv <= 0. || (g.inv * 12.) as i32 % 2 == 0) {
         let color = craft_color(g.craft);
         for port in g.craft.ports() {
             let p = g.player + vec2(*port * 0.35, 25.);
@@ -910,18 +943,21 @@ fn draw_game(a: &Art, g: &Game) {
     }
     // HUD follows 194X: armor / reserves / score at upper left, mission beneath, controls upper right.
     draw_rectangle(0., 0., W, 82., Color::new(0.015, 0.04, 0.065, 0.88));
-    a.label(
-        &format!(
-            "THE FORCE {:03}  |  WINGMEN {}",
-            g.force.ceil() as i32,
-            g.reserves
-        ),
-        vec2(12., 22.),
-        13.,
-        BLUE,
-        false,
-        false,
-    );
+    a.label("THE FORCE", vec2(12., 17.), 10., BLUE, false, false);
+    let force = (g.force / 150.).clamp(0., 1.);
+    let color = Color::new(1. - force, 0.16 + force * 0.66, 0.1 + force * 0.9, 1.);
+    draw_rectangle(78., 8., 108., 10., Color::new(0.15, 0.1, 0.13, 1.));
+    draw_rectangle(78., 8., 108. * force, 10., color);
+    draw_rectangle_lines(78., 8., 108., 10., 0.7, BLUE);
+    for i in 0..g.reserves {
+        a.craft(
+            g.craft,
+            vec2(204. + (i % 7) as f32 * 18., 13. + (i / 7) as f32 * 13.),
+            16.,
+            0.,
+            WHITE,
+        );
+    }
     a.label(
         &format!("SCORE {:07}   BOMBS {}", g.score, g.bombs),
         vec2(12., 42.),
@@ -1025,6 +1061,75 @@ fn draw_game(a: &Art, g: &Game) {
         false,
         false,
     );
+}
+fn draw_final_loss(a: &Art, g: &Game) {
+    let t = g.age;
+    let p = g.player;
+    if t < 1. {
+        a.craft(g.craft, p, 48., (t * 40.).sin() * 0.07, WHITE);
+        for i in 0..6 {
+            let q = p + vec2((i as f32 * 2.4).sin() * 12., (i as f32 * 2.4).cos() * 14.);
+            draw_circle(q.x, q.y, 2. + t * 5., Color::new(1., 0.35, 0.05, t * 0.8));
+        }
+    } else {
+        let age = t - 1.;
+        let craft = match g.craft {
+            Craft::Xwing => 0,
+            Craft::Ywing => 1,
+            Craft::Awing => 2,
+        };
+        for i in 0..16 {
+            let angle = i as f32 * 2.399;
+            let speed = 24. + (i % 5) as f32 * 15.;
+            let q = p + vec2(angle.cos(), angle.sin()) * age * speed + vec2(0., age * age * 13.);
+            a.image(
+                &a.rebel,
+                Rect::new(
+                    craft as f32 * 418. + (i % 4) as f32 * 104.5,
+                    (i / 4) as f32 * 104.5,
+                    104.5,
+                    104.5,
+                ),
+                q,
+                vec2(12., 12.),
+                angle * age,
+                WHITE.with_alpha((1. - age / 3.2).max(0.)),
+            );
+        }
+        for i in (1..=8).rev() {
+            let f = i as f32 / 8.;
+            draw_circle(
+                p.x,
+                p.y,
+                (10. + age * 72.) * f,
+                Color::new(
+                    1.,
+                    0.15 + (1. - f) * 0.7,
+                    0.02,
+                    (1. - age / 2.).max(0.) * 0.17,
+                ),
+            );
+        }
+        draw_circle_lines(
+            p.x,
+            p.y,
+            age * 115.,
+            2.,
+            GOLD.with_alpha((1. - age / 2.5).max(0.)),
+        );
+        for i in 0..48 {
+            let a = i as f32 * 2.399;
+            let q = p + vec2(a.cos(), a.sin()) * age * (30. + (i % 9) as f32 * 13.);
+            draw_line(
+                q.x,
+                q.y,
+                q.x - a.cos() * 9.,
+                q.y - a.sin() * 9.,
+                1.,
+                GOLD.with_alpha((1. - age / 3.).max(0.)),
+            );
+        }
+    }
 }
 fn craft_color(c: Craft) -> Color {
     match c {
@@ -1210,7 +1315,7 @@ async fn main() {
             });
         }
         let mobile = !touches.is_empty() || app.touch.enabled || screen_width() < 700.;
-        let playing = matches!(app.screen, Screen::Play | Screen::Pause);
+        let playing = matches!(app.screen, Screen::Play | Screen::Pause | Screen::Dying);
         let scene_height = if playing {
             (screen_height() / screen_width() * W).clamp(H, 1500.)
         } else {
@@ -1344,9 +1449,25 @@ async fn main() {
                 } else {
                     app.game.update(dt, act.input);
                     if matches!(app.game.phase, Phase::Won | Phase::Lost) {
-                        app.screen = Screen::End;
+                        app.screen = if app.game.phase == Phase::Lost {
+                            Screen::Dying
+                        } else {
+                            Screen::End
+                        };
                         app.game.shake = 0.
                     }
+                }
+            }
+            Screen::Dying => {
+                app.game.events.clear();
+                let old = app.game.age;
+                app.game.age += dt;
+                if old < 1. && app.game.age >= 1. {
+                    app.game.events.push(Event::Explosion(3.));
+                }
+                if app.game.age >= 4.2 {
+                    app.screen = Screen::End;
+                    app.game.age = 0.;
                 }
             }
             Screen::Pause => {
@@ -1393,6 +1514,33 @@ async fn main() {
                         app.game.phase = Phase::Won;
                         app.screen = Screen::End;
                     }
+                    if scene == 9 || scene == 10 {
+                        app.game.phase = Phase::Lost;
+                        app.game.age = if scene == 9 { 0.6 } else { 1.8 };
+                        app.screen = Screen::Dying;
+                    }
+                    if scene == 11 || scene == 12 {
+                        app.game.stage = if scene == 11 { 1 } else { 4 };
+                        app.game.fleet.clear();
+                        app.game.phase = Phase::Waves;
+                        for i in 0..3 {
+                            let x = 110. + i as f32 * 190.;
+                            app.game.enemies.push(Enemy {
+                                id: 900 + i,
+                                kind: 4,
+                                p: vec2(x, 350.),
+                                base: x,
+                                age: 18.,
+                                hp: 30.,
+                                timer: 10.,
+                                form: 0,
+                                seed: 0.,
+                                angle: PI,
+                                dead: false,
+                                path: FlightPath::Emplacement { x },
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -1404,7 +1552,7 @@ async fn main() {
             ) || (app.game.phase == Phase::Waves
                 && app.game.time >= app.game.boss_arrival_time() - 10.));
         audio.update(
-            if app.screen == Screen::Play {
+            if matches!(app.screen, Screen::Play | Screen::Dying) {
                 &app.game.events
             } else {
                 &[]
@@ -1437,7 +1585,24 @@ async fn main() {
                     ..Camera2D::from_display_rect(Rect::new(0., 0., W, scene_height))
                 })
             }
+            if app.screen == Screen::Dying {
+                let t = (app.game.age / 1.).clamp(0., 1.);
+                let zoom = 1. + t * 1.7;
+                let center = vec2(W / 2., scene_height / 2.).lerp(app.game.player, t);
+                set_camera(&Camera2D {
+                    render_target: Some(target.clone()),
+                    ..Camera2D::from_display_rect(Rect::new(
+                        center.x - W / zoom / 2.,
+                        center.y - scene_height / zoom / 2.,
+                        W / zoom,
+                        scene_height / zoom,
+                    ))
+                });
+            }
             draw_game(&art, &app.game);
+            if app.screen == Screen::Dying {
+                draw_final_loss(&art, &app.game);
+            }
             if app.screen == Screen::Pause {
                 draw_rectangle(0., 0., W, scene_height, Color::new(0.01, 0.035, 0.06, 0.8));
                 art.label("FLIGHT PAUSED", vec2(300., 400.), 55., GOLD, true, true);
@@ -1540,7 +1705,7 @@ async fn main() {
         }
         if capture {
             capture_frame += 1;
-            if capture_frame >= 36 {
+            if capture_frame >= 52 {
                 break;
             }
         }
@@ -1551,6 +1716,7 @@ async fn main() {
                 Screen::Play => 1,
                 Screen::Pause => 2,
                 Screen::End => 3,
+                Screen::Dying => 4,
             };
             STATUS.store(
                 screen

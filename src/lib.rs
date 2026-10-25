@@ -214,6 +214,7 @@ pub struct Enemy {
 /// The dive / side sweep / turning hook paths match the earlier 194X simulation.
 #[derive(Clone, Copy, Debug)]
 pub enum FlightPath {
+    Emplacement { x: f32 },
     Dive { x: f32, phase: f32 },
     Sweep { side: f32, lane: f32, phase: f32 },
     Hook { side: f32, lane: f32 },
@@ -221,6 +222,7 @@ pub enum FlightPath {
 impl FlightPath {
     pub fn position(self, age: f32, speed: f32) -> Vec2 {
         match self {
+            Self::Emplacement { x } => vec2(x, -45. + age * 22.),
             Self::Dive { x, phase } => vec2(
                 x + (age * 1.6 + phase).sin() * 45.,
                 -70. + age * 145. * speed,
@@ -280,6 +282,7 @@ pub struct Input {
     pub slow: bool,
 }
 pub struct Game {
+    pub entry: f32,
     pub height: f32,
     pub craft: Craft,
     pub difficulty: Difficulty,
@@ -333,6 +336,7 @@ impl Game {
     pub fn new(craft: Craft, difficulty: Difficulty, stage: usize) -> Self {
         let stage = stage.min(4);
         Self {
+            entry: 0.,
             height: H,
             craft,
             difficulty,
@@ -535,7 +539,8 @@ impl Game {
             if self.reserves > 0 {
                 self.reserves -= 1;
                 self.force = self.craft.force();
-                self.player = vec2(W / 2., self.height - 100.);
+                self.player = vec2(W / 2., self.height + 45.);
+                self.entry = 3.;
                 self.inv = 3.;
                 self.bombs = self.bombs.max(2);
                 self.levels[self.weapon] = self.levels[self.weapon].saturating_sub(1).max(1);
@@ -597,6 +602,24 @@ impl Game {
             })
         }
         self.wave += 1;
+        if self.wave % 2 == 0 {
+            let x = 65. + (self.wave * 137 % 470) as f32;
+            let id = self.id();
+            self.enemies.push(Enemy {
+                id,
+                kind: 4,
+                p: vec2(x, -45.),
+                base: x,
+                age: 0.,
+                hp: 18. * self.difficulty.enemy_armor(),
+                timer: 2.,
+                form: 0,
+                seed: 0.,
+                angle: PI,
+                dead: false,
+                path: FlightPath::Emplacement { x },
+            });
+        }
         self.spawn = (2.5 - strength as f32 * 0.18).max(1.35) * self.difficulty.interval()
             / (1. + self.stage as f32 * 0.12);
     }
@@ -679,8 +702,13 @@ impl Game {
                     )
                 } else {
                     vec2(
-                        side * size.x * (0.10 + row as f32 * 0.022),
-                        (-0.03 + row as f32 / ((count / 2 - 1) as f32) * 0.30) * size.y,
+                        side * size.x * (0.25 - row as f32 / (count / 2 - 1) as f32 * 0.13)
+                            - if kind == Hull::Executor {
+                                size.x * 0.07
+                            } else {
+                                0.
+                            },
+                        (0.30 - row as f32 / ((count / 2 - 1) as f32) * 0.38) * size.y,
                     )
                 };
                 guns.push(Gun {
@@ -855,7 +883,6 @@ impl Game {
         }
     }
     fn fleet_update(&mut self, dt: f32) {
-        let shield = self.guns_left() > 0;
         let speed = self.difficulty.speed();
         let interval = self.difficulty.interval();
         let mut queued = vec![];
@@ -864,6 +891,7 @@ impl Game {
             if b.dead {
                 continue;
             }
+            let shield = b.guns.iter().any(|gun| gun.hp > 0.);
             let target_y = b.arrival_y();
             b.p.y = (b.p.y + 150. * dt).min(target_y);
             b.p.x = b.base + (b.age * 0.6 + b.seed).sin() * if self.stage < 2 { 45. } else { 12. };
@@ -899,10 +927,10 @@ impl Game {
                     self.events.push(Event::Laser(true, true))
                 }
             }
-            if !shield {
+            {
                 b.bridge_timer -= dt;
                 if b.bridge_timer < 0. && b.p.y >= target_y {
-                    b.bridge_timer = 1.9 * interval;
+                    b.bridge_timer = (if shield { 1.9 } else { 0.95 }) * interval;
                     let p = b.p + b.bridge;
                     let a = (self.player - p).to_angle();
                     for n in -3..=3 {
@@ -949,6 +977,7 @@ impl Game {
         self.time += dt;
         self.age += dt;
         self.inv -= dt;
+        self.entry = (self.entry - dt).max(0.);
         self.fire -= dt;
         self.flash = (self.flash - dt * 1.4).max(0.);
         self.shake = (self.shake - dt * 15.).max(0.);
@@ -971,6 +1000,11 @@ impl Game {
         self.player += movement * dt + input.drag;
         self.player.x = self.player.x.clamp(28., W - 28.);
         self.player.y = self.player.y.clamp(100., self.height - 35.);
+        if self.entry > 0. {
+            let t = (1. - self.entry / 3.).clamp(0., 1.);
+            self.player = vec2(W / 2., self.height + 45. - 145. * (t / 0.55).min(1.));
+            self.inv = self.entry;
+        }
         if input.swap {
             self.weapon = 1 - self.weapon
         }
@@ -1027,7 +1061,9 @@ impl Game {
                 * (1. + self.stage as f32 * 0.07)
                 * if e.kind == 2 { 0.72 } else { 1. };
             e.p = e.path.position(e.age, speed);
-            if (e.p - old).length_squared() > 0.001 {
+            if e.kind == 4 {
+                e.angle = (self.player - e.p).to_angle() + PI / 2.;
+            } else if (e.p - old).length_squared() > 0.001 {
                 e.angle = (e.p - old).to_angle() + PI / 2.;
             }
             if e.age < 0. {
@@ -1043,17 +1079,9 @@ impl Game {
                 e.timer = 2.2 * self.difficulty.interval() / (1. + self.stage as f32 * 0.09);
                 let aim = (self.player - e.p).normalize_or_zero() * 200. * speed;
                 queued.push((e.p, aim));
-                if e.kind == 2 {
-                    let count = match self.difficulty {
-                        Difficulty::Rookie => 8,
-                        Difficulty::Ace => 12,
-                        Difficulty::Legend => 16,
-                    };
-                    for n in 0..count {
-                        let a = n as f32 / count as f32 * TAU + e.age * 0.25;
-                        queued.push((e.p, vec2(a.cos(), a.sin()) * 130. * self.difficulty.speed()));
-                    }
-                } else if (e.kind == 1 || e.kind == 3) && self.difficulty != Difficulty::Rookie {
+                if (e.kind == 1 || e.kind == 2 || e.kind == 3)
+                    && self.difficulty != Difficulty::Rookie
+                {
                     for side in [-1., 1.] {
                         queued.push((e.p, aim + vec2(side * 55., 0.)));
                     }
@@ -1217,6 +1245,40 @@ impl Game {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn replacement_enters_from_below_with_three_seconds_of_protection() {
+        let mut g = game();
+        g.inv = 0.;
+        let reserves = g.reserves;
+        g.hurt(999.);
+        assert_eq!(g.reserves, reserves - 1);
+        assert!(g.player.y > g.height);
+        for _ in 0..29 {
+            g.update(0.1, Input::default());
+            g.hurt(999.);
+        }
+        assert_eq!(g.force, 150.);
+        assert!(g.inv > 0.);
+        assert!(g.player.y < g.height);
+        g.update(0.2, Input::default());
+        assert!(g.inv <= 0.);
+    }
+    #[test]
+    fn command_bursts_start_with_turrets_and_double_when_exposed() {
+        let mut g = game();
+        g.start_boss(false);
+        g.fleet[0].p.y = g.fleet[0].arrival_y();
+        g.fleet[0].bridge_timer = 0.;
+        g.fleet_update(0.01);
+        assert!(g.shots.len() >= 23);
+        let guarded = g.fleet[0].bridge_timer;
+        for gun in &mut g.fleet[0].guns {
+            gun.hp = 0.;
+        }
+        g.fleet[0].bridge_timer = 0.;
+        g.fleet_update(0.01);
+        assert!((g.fleet[0].bridge_timer * 2. - guarded).abs() < 0.01);
+    }
     use super::*;
     fn game() -> Game {
         Game::new(Craft::Xwing, Difficulty::Ace, 0)
@@ -1360,7 +1422,7 @@ mod tests {
         assert!(hook.position(4., 1.).x < hook.position(2., 1.).x);
     }
     #[test]
-    fn armored_bombers_fire_starbursts_in_all_directions() {
+    fn armored_bombers_fire_normal_aimed_lasers() {
         let mut g = game();
         g.spawn = 99.;
         g.enemies.push(Enemy {
@@ -1379,10 +1441,8 @@ mod tests {
         });
         g.update(0.01, Input::default());
         let shots: Vec<_> = g.shots.iter().filter(|s| s.enemy).collect();
-        assert!(shots.len() >= 13);
-        for direction in [vec2(1., 0.), vec2(-1., 0.), vec2(0., 1.), vec2(0., -1.)] {
-            assert!(shots.iter().any(|p| p.v.dot(direction) > 50.));
-        }
+        assert_eq!(shots.len(), 3);
+        assert!(shots.iter().all(|s| s.v.y > 0.));
     }
     #[test]
     fn capital_command_decks_rotate_with_downward_hulls() {

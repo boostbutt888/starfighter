@@ -12,7 +12,7 @@ A Star Wars themed vertical shooter written in **Rust**. The Windows app and pho
 
 ## Controls
 
-The arrangement follows 194X: **Pause / Play**, **Swap** and **Mute / Sound** at top right, a floating **BOMB** button at bottom right, and the HUD at top left. Drag to steer with automatic fire. Movement is relative, so landing a finger never teleports the fighter. A second finger can launch a bomb without disturbing steering. Backgrounding the browser pauses play.
+The arrangement follows 194X: **Pause / Play** and **Mute / Sound** at top right, a floating **BOMB** button at bottom right, and the HUD at top left. Force appears as a blue-to-red bar and reserve wingmen as fighter icons. Drag to steer with automatic fire. Movement is relative, so landing a finger never teleports the fighter. A second finger can launch a bomb without disturbing steering. Backgrounding the browser pauses play.
 
 | Keyboard | Action |
 | --- | --- |
@@ -25,7 +25,7 @@ The arrangement follows 194X: **Pause / Play**, **Swap** and **Mute / Sound** at
 | M | Toggle audio |
 | F11 | Fullscreen |
 | Left / right at menu | Select craft |
-| 1 / 2 / 3 | Rookie / Ace / Legend |
+| 1 / 2 / 3 | Rookie / Pilot / Legend |
 | Q / E or Page Up / Down | Select deployment |
 | Enter / Space | Launch / return after debrief |
 
@@ -35,11 +35,13 @@ All three are selectable immediately and rendered from overhead at reduced fight
 
 | Craft | Handling and lasers | Starting bombs |
 | --- | --- | --- |
-| X-wing | Balanced; four wing cannons; red | 3 |
-| Y-wing | Slower, stronger Force capacity; nose cannons; blue | 5 |
-| A-wing | Fastest and most agile; twin edge cannons; green | 2 |
+| X-wing | Balanced; four wing cannons | 7 |
+| Y-wing | Slower; nose cannons | 10 |
+| A-wing | Fastest and most agile; twin edge cannons | 5 |
 
-Glowing blue **THE FORCE** pickups restore 35 Force and add a bomb. Spread and Cannon each have six independent upgrade levels. Spread widens into a fan; Cannon gains width, damage and piercing. A lost craft is replaced by a reserve wingman with restored Force, brief protection, at least two bombs and one weapon level lost.
+Glowing blue **THE FORCE** pickups restore 35 Force, capped at 150. Bombs are capped by craft; full pickups remain uncollected. Green Spread has six levels with a narrower fan; blue rapid fire has four levels with increasing firing speed. A reserve wingman enters from below and blinks with three seconds of protection. Losing the final fighter triggers a zoom, explosion and hull breakup before the debrief.
+
+Boss command centers and Jabba fire red starbursts from the start, doubling their firing rate after that ship loses all turrets. TIE bombers fire aimed lasers. Anchored ground cannons scroll with terrain; space missions use satellite turrets in their place.
 
 ## Five missions
 
