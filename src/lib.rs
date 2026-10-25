@@ -26,17 +26,13 @@ impl Craft {
         }
     }
     pub fn force(self) -> f32 {
-        match self {
-            Self::Xwing => 100.,
-            Self::Ywing => 130.,
-            Self::Awing => 85.,
-        }
+        150.
     }
     pub fn bombs(self) -> u32 {
         match self {
-            Self::Xwing => 3,
-            Self::Ywing => 5,
-            Self::Awing => 2,
+            Self::Xwing => 7,
+            Self::Ywing => 10,
+            Self::Awing => 5,
         }
     }
     pub fn ports(self) -> &'static [f32] {
@@ -651,7 +647,8 @@ impl Game {
                 _ => 12,
             };
             let station = if kind == Hull::DeathStar2 { 2. } else { 1. };
-            let ghp = (10. + self.stage as f32 * 3. + if ambush { 7. } else { 0. })
+            let ghp = 3.
+                * (10. + self.stage as f32 * 3. + if ambush { 7. } else { 0. })
                 * self.difficulty.armor()
                 * station;
             let bhp = (24. + self.stage as f32 * 10. + if ambush { 25. } else { 0. })
@@ -799,7 +796,7 @@ impl Game {
             self.phase = Phase::Clear;
             self.score += 1500 * (self.stage as u32 + 1);
             self.force = (self.force + 35.).min(self.craft.force());
-            self.bombs = (self.bombs + 1).min(self.craft.bombs() + 2);
+            self.bombs = (self.bombs + 1).min(self.craft.bombs());
             if self.stage == 1 || self.stage == 3 {
                 self.reserves += 1
             }
@@ -981,7 +978,7 @@ impl Game {
         if self.phase == Phase::FalseVictory && self.age > 5. {
             self.start_boss(true);
             self.force = (self.force + 40.).min(self.craft.force());
-            self.bombs += 1;
+            self.bombs = (self.bombs + 1).min(self.craft.bombs());
             self.inv = 4.
         }
         if self.phase == Phase::Clear && self.age > 4.5 {
@@ -1133,19 +1130,25 @@ impl Game {
             p.age += dt;
             p.p.y += 55. * dt;
             if p.p.distance(self.player) < 31. {
-                p.dead = true;
-                collected.push(p.kind)
+                let full = match p.kind {
+                    PickupKind::Force => self.force >= 150.,
+                    PickupKind::Bomb => self.bombs >= self.craft.bombs(),
+                    PickupKind::Spread | PickupKind::Cannon => false,
+                };
+                if !full {
+                    p.dead = true;
+                    collected.push(p.kind)
+                }
             }
         }
         for kind in collected {
             match kind {
                 PickupKind::Force => {
-                    self.force = (self.force + 35.).min(self.craft.force());
-                    self.bombs += 1;
-                    self.message("THE FORCE IS WITH YOU / +35 FORCE / +1 BOMB", 2.)
+                    self.force = (self.force + 35.).min(150.);
+                    self.message("THE FORCE IS WITH YOU / +35 FORCE", 2.)
                 }
                 PickupKind::Bomb => {
-                    self.bombs += 1;
+                    self.bombs = (self.bombs + 1).min(self.craft.bombs());
                     self.message("PROTON PAYLOAD +1", 2.)
                 }
                 PickupKind::Spread | PickupKind::Cannon => {
@@ -1204,7 +1207,7 @@ mod tests {
         g.drop(g.player, PickupKind::Force);
         g.update(0.01, Input::default());
         assert_eq!(g.force, 65.);
-        assert_eq!(g.bombs, 4)
+        assert_eq!(g.bombs, 7)
     }
     #[test]
     fn craft_loadouts_and_six_weapon_levels() {

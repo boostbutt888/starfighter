@@ -87,16 +87,14 @@ impl Art {
             ))
             .unwrap(),
         };
-        for t in [
-            &a.title,
-            &a.rebel,
-            &a.imperial,
-            &a.stations,
-            &a.barge,
-            &a.turrets,
-        ]
-        .into_iter()
-        .chain(a.backgrounds.iter())
+        // Atlas textures must use nearest sampling; linear filtering samples
+        // neighboring hulls across crop boundaries and creates stray fragments.
+        for t in [&a.rebel, &a.imperial, &a.stations] {
+            t.set_filter(FilterMode::Nearest)
+        }
+        for t in [&a.title, &a.barge, &a.turrets]
+            .into_iter()
+            .chain(a.backgrounds.iter())
         {
             t.set_filter(FilterMode::Linear)
         }
@@ -316,8 +314,6 @@ impl TouchState {
             } else if play && v.button(1).contains(p.position) {
                 a.pause = true
             } else if play && v.button(2).contains(p.position) {
-                a.input.swap = true
-            } else if play && v.button(3).contains(p.position) {
                 a.mute = true
             } else if paused {
                 a.pause = true
@@ -333,6 +329,7 @@ impl TouchState {
 }
 #[derive(Clone, Copy, PartialEq)]
 enum Screen {
+    Intro,
     Menu,
     Play,
     Pause,
@@ -350,7 +347,7 @@ struct App {
 impl App {
     fn new() -> Self {
         Self {
-            screen: Screen::Menu,
+            screen: Screen::Intro,
             craft: 0,
             difficulty: 1,
             stage: 0,
@@ -926,7 +923,7 @@ fn draw_controls(a: &Art, v: View, app: &App, au: &audio::Audio) {
     if !matches!(app.screen, Screen::Play | Screen::Pause) {
         return;
     }
-    for i in 0..4 {
+    for i in 0..3 {
         let r = v.button(i);
         panel(
             r,
@@ -946,7 +943,6 @@ fn draw_controls(a: &Art, v: View, app: &App, au: &audio::Audio) {
                     "PAUSE".into()
                 }
             }
-            2 => "SWAP".into(),
             _ => {
                 if au.music || au.effects {
                     "MUTE".into()
@@ -977,6 +973,46 @@ fn draw_controls(a: &Art, v: View, app: &App, au: &audio::Audio) {
             true,
             false,
         )
+    }
+}
+fn draw_intro(a: &Art, time: f32) {
+    draw_texture_ex(
+        &a.backgrounds[2],
+        0.,
+        0.,
+        WHITE,
+        DrawTextureParams {
+            dest_size: Some(vec2(W, H)),
+            ..Default::default()
+        },
+    );
+    draw_rectangle(0., 0., W, H, Color::new(0.01, 0.03, 0.05, 0.52));
+    a.label("DAGOBAH VENTURES", vec2(300., 285.), 46., GOLD, true, true);
+    a.label(
+        "A STARFIGHTER CAMPAIGN",
+        vec2(300., 330.),
+        18.,
+        CREAM,
+        true,
+        true,
+    );
+    a.label(
+        "THE REBELLION FLIES WHERE OTHERS FEAR TO GO",
+        vec2(300., 388.),
+        13.,
+        CREAM,
+        true,
+        true,
+    );
+    if time.sin() > -0.2 {
+        a.label(
+            "TAP OR PRESS ENTER TO BEGIN",
+            vec2(300., 610.),
+            15.,
+            BLUE,
+            true,
+            true,
+        );
     }
 }
 fn input_keys(a: &mut Actions) {
@@ -1078,12 +1114,11 @@ async fn main() {
         if is_mouse_button_pressed(MouseButton::Left) && touches.is_empty() {
             let raw = vec2(mouse_position().0, mouse_position().1);
             if matches!(app.screen, Screen::Play | Screen::Pause) {
-                for i in 0..4 {
+                for i in 0..3 {
                     if view.button(i).contains(raw) {
                         match i {
                             0 => act.input.bomb = true,
                             1 => act.pause = true,
-                            2 => act.input.swap = true,
                             _ => {
                                 let muted = audio.music || audio.effects;
                                 audio.music = !muted;
@@ -1097,6 +1132,15 @@ async fn main() {
             }
         }
         match app.screen {
+            Screen::Intro => {
+                if is_key_pressed(KeyCode::Enter)
+                    || is_key_pressed(KeyCode::Space)
+                    || !act.menu_points.is_empty()
+                {
+                    app.screen = Screen::Menu;
+                    app.touch.enabled = false;
+                }
+            }
             Screen::Menu => {
                 if is_key_pressed(KeyCode::Q) || is_key_pressed(KeyCode::PageUp) {
                     app.stage = (app.stage + 4) % 5
@@ -1227,7 +1271,9 @@ async fn main() {
             ..Camera2D::from_display_rect(Rect::new(0., 0., W, scene_height))
         });
         clear_background(INK);
-        if app.screen == Screen::Menu {
+        if app.screen == Screen::Intro {
+            draw_intro(&art, get_time() as f32);
+        } else if app.screen == Screen::Menu {
             draw_menu(&art, &app, &audio, get_time() as f32)
         } else {
             let shake = if app.screen == Screen::Play {
@@ -1355,7 +1401,7 @@ async fn main() {
         #[cfg(target_arch = "wasm32")]
         {
             let screen = match app.screen {
-                Screen::Menu => 0,
+                Screen::Intro | Screen::Menu => 0,
                 Screen::Play => 1,
                 Screen::Pause => 2,
                 Screen::End => 3,
